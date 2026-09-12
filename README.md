@@ -98,11 +98,14 @@ interactive Pods often mount the volume at `/workspace`, while
 Serverless endpoint itself mounts the volume at `/runpod-volume`.
 
 ```bash
-python3 -m pip install -U "huggingface_hub[cli]"
-huggingface-cli download GD-ML/DreamX-Creator \
-  --include "creator/*" "audio_vae/*" "wan2.2_ti2v_5b/*" \
-  --local-dir /path/to/network/volume/dreamx-creator
+pip install -U "huggingface_hub[cli]"
+python3 scripts/download_weights.py --dest /path/to/network/volume/dreamx-creator
 ```
+
+See [`scripts/download_weights.py`](./scripts/download_weights.py) for
+details — it verifies file counts per directory after download and is safe
+to re-run (resumes rather than restarting). Pass `--include-refiner` if you
+later add the 2K refiner stage and want its weights fetched too.
 
 ## API Usage
 
