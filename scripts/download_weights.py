@@ -20,7 +20,7 @@ on this pod, it will show up at /runpod-volume/dreamx-creator for the
 deployed worker. Check `df -h` / `mount` on your pod to confirm where the
 network volume is actually mounted before running this.
 
-    pip install -U "huggingface_hub[cli]" hf_transfer
+    pip install -U "huggingface_hub[cli]" hf_xet
     python3 scripts/download_weights.py --dest /workspace/dreamx-creator
 
 Safe to re-run: huggingface_hub's snapshot_download skips files that are
@@ -29,12 +29,16 @@ already fully downloaded and resumes partial ones, so an interrupted run
 already there.
 
 Speed: `creator/video_model`'s two shards and the T5 checkpoint are each
-~10-11GB single files. Without hf_transfer, huggingface_hub downloads each
-over one HTTP connection, which on many hosts caps out well under the
-link's real bandwidth. If `hf_transfer` is importable, this script enables
-it automatically (HF_HUB_ENABLE_HF_TRANSFER=1) for chunked, multi-connection
-downloads of each file — `pip install hf_transfer` before running to get
-this. If downloads are still slow with hf_transfer on, the bottleneck is
+~10-11GB single files, and this repo is Xet-enabled. This script
+auto-detects and enables the fastest available transfer backend:
+- `hf_xet` installed -> sets HF_XET_HIGH_PERFORMANCE=1 (current
+  huggingface_hub releases use Xet as the fast path; this is the one to
+  install today — `pip install hf_xet`).
+- `hf_transfer` installed instead (older huggingface_hub only) ->
+  sets HF_HUB_ENABLE_HF_TRANSFER=1.
+- Neither installed -> falls back to a single HTTP connection per file,
+  which on many hosts caps out well under the link's real bandwidth.
+If downloads are still slow with a fast backend enabled, the bottleneck is
 more likely the network volume's own write throughput (RunPod network
 volumes are NFS-backed and can be slower than local/ephemeral disk) rather
 than the download itself — in that case, download to local disk first
@@ -46,12 +50,24 @@ import os
 import time
 from pathlib import Path
 
+# GD-ML/DreamX-Creator is Xet-enabled (confirmed via the HF API). Current
+# huggingface_hub releases (>=1.x, and recent 0.3x) use Xet as the fast-path
+# transfer backend and have dropped hf_transfer — setting
+# HF_HUB_ENABLE_HF_TRANSFER on those versions now only prints a
+# FutureWarning and does nothing. Detect which backend is actually
+# available and set only the variable that backend honors.
+_FAST_TRANSFER = None
 try:
-    import hf_transfer  # noqa: F401
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
-    _HF_TRANSFER_ON = True
+    import hf_xet  # noqa: F401
+    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
+    _FAST_TRANSFER = "hf_xet (HF_XET_HIGH_PERFORMANCE=1)"
 except ImportError:
-    _HF_TRANSFER_ON = False
+    try:
+        import hf_transfer  # noqa: F401
+        os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+        _FAST_TRANSFER = "hf_transfer (HF_HUB_ENABLE_HF_TRANSFER=1)"
+    except ImportError:
+        pass
 
 REPO_ID = "GD-ML/DreamX-Creator"
 
@@ -93,7 +109,7 @@ def download(dest: Path, include_refiner: bool) -> None:
         patterns += REFINER_PATTERNS
 
     print(f"Downloading {REPO_ID} -> {dest}")
-    print(f"hf_transfer: {'ON (multi-connection chunked downloads)' if _HF_TRANSFER_ON else 'OFF — pip install hf_transfer for faster large-file downloads'}")
+    print(f"Fast transfer: {_FAST_TRANSFER or 'OFF — pip install hf_xet for faster large-file downloads'}")
     for p in patterns:
         print(f"  {p}")
 
