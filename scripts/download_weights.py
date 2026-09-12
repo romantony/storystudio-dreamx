@@ -20,18 +20,38 @@ on this pod, it will show up at /runpod-volume/dreamx-creator for the
 deployed worker. Check `df -h` / `mount` on your pod to confirm where the
 network volume is actually mounted before running this.
 
-    pip install -U "huggingface_hub[cli]"
+    pip install -U "huggingface_hub[cli]" hf_transfer
     python3 scripts/download_weights.py --dest /workspace/dreamx-creator
 
 Safe to re-run: huggingface_hub's snapshot_download skips files that are
 already fully downloaded and resumes partial ones, so an interrupted run
 (or a rerun with --include-refiner added later) won't re-fetch what's
 already there.
+
+Speed: `creator/video_model`'s two shards and the T5 checkpoint are each
+~10-11GB single files. Without hf_transfer, huggingface_hub downloads each
+over one HTTP connection, which on many hosts caps out well under the
+link's real bandwidth. If `hf_transfer` is importable, this script enables
+it automatically (HF_HUB_ENABLE_HF_TRANSFER=1) for chunked, multi-connection
+downloads of each file — `pip install hf_transfer` before running to get
+this. If downloads are still slow with hf_transfer on, the bottleneck is
+more likely the network volume's own write throughput (RunPod network
+volumes are NFS-backed and can be slower than local/ephemeral disk) rather
+than the download itself — in that case, download to local disk first
+(e.g. --dest /root/dreamx-staging) and copy/rsync to the network volume
+path afterward as one large sequential write.
 """
 import argparse
 import os
 import time
 from pathlib import Path
+
+try:
+    import hf_transfer  # noqa: F401
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+    _HF_TRANSFER_ON = True
+except ImportError:
+    _HF_TRANSFER_ON = False
 
 REPO_ID = "GD-ML/DreamX-Creator"
 
@@ -73,6 +93,7 @@ def download(dest: Path, include_refiner: bool) -> None:
         patterns += REFINER_PATTERNS
 
     print(f"Downloading {REPO_ID} -> {dest}")
+    print(f"hf_transfer: {'ON (multi-connection chunked downloads)' if _HF_TRANSFER_ON else 'OFF — pip install hf_transfer for faster large-file downloads'}")
     for p in patterns:
         print(f"  {p}")
 
