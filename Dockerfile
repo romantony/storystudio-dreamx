@@ -27,7 +27,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
     && ln -sf /usr/bin/python3.12 /usr/bin/python
 
-RUN python3 -m pip install --no-cache-dir --break-system-packages -U pip
+# --ignore-installed: Ubuntu 24.04's apt-packaged python3-pip has no RECORD
+# file, so pip's normal uninstall-before-upgrade step fails with "Cannot
+# uninstall pip 24.0, RECORD file not found" — --ignore-installed skips that
+# and just lays the new version on top.
+RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed -U pip
 
 WORKDIR /workspace
 
