@@ -204,6 +204,51 @@ docker push <dockerhub-user>/dreamx-creator-base:latest
 | `DEFAULT_STEPS` | `50` | Steps used when a request omits `num_inference_steps` |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PUBLIC_URL` | see `handler.py` | Cloudflare R2 upload target |
 
+## 2K Refiner endpoint (`refiner/`)
+
+A separate worker and image (`romantony/dreamx-creator-refiner`, built by
+`.github/workflows/docker-build-refiner.yml` on changes under `refiner/`) for
+DreamX's SR-DiT 2x video refiner (`video_refiner/` upstream). It takes a
+finished clip, e.g. this worker's output, and returns a ~2x upscaled MP4 with
+the source audio copied through. The model server runs upstream's
+`inference_sr.py` unmodified: its setup once at startup, its inference loop per
+job, with defaults matching `run_inference.sh`.
+
+**Weights:** it uses the same network volume. Add `refiner/` (~11 GB) alongside
+the existing base weights (base + refiner ≈ 51 GB):
+
+```bash
+python3 scripts/download_weights.py --dest /workspace/dreamx-creator --include-refiner
+python3 scripts/check_download.py --dest /workspace/dreamx-creator --include-refiner
+```
+
+**Endpoint:** image `romantony/dreamx-creator-refiner:latest`, the same network
+volume, the same R2 env vars, and an execution timeout of at least 1800s.
+Upstream only benchmarks 1248x704 -> 2K on an H20 (96 GB); peak VRAM on a 48 GB
+RTX 6000 Ada is unmeasured. If it OOMs, set `REFINER_WINDOW_CHUNK` (bounds
+window-attention memory) or use an RTX PRO 6000 (96 GB).
+
+**API** (same shape as PostProd-Lite's `upscale` mode):
+
+| Input | Default | |
+|---|---|---|
+| `video_url` | required | |
+| `target_height` | - | Output height; returns the source unchanged (`upscale: "skipped_source_hires"`) if it is already that tall |
+| `sr_scale` | `2.0` | Used when `target_height` is omitted; 1.0–2.25 |
+| `seed` | `42` | |
+| `project_id` / `frame_id` | - | R2 key naming, as in the base worker |
+
+Output: `video` / `video_url`, `upscale` (`"dreamx_sr_<H>p"`), `width`,
+`height`, `sr_scale`, `seed`, `video_size_mb`, `model_generation_time`,
+`generation_time`. Test with `scripts/test_refiner.py`.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `REFINER_FAST` | `0` | `1` = fp8 DiT + LightVAE-NU decoder (upstream: 155.8s -> 46.2s per clip, ~36 dB PSNR vs default) |
+| `REFINER_WINDOW_CHUNK` | unset | Windows per batch in block-grid attention, to bound peak memory |
+| `VIDEO_CRF` | `18` | libx264 quality of the refined MP4 |
+| `MAX_INPUT_FRAMES` | `241` | Rejects longer inputs |
+
 ## Status
 
 Dockerfile, handler, and model server are written and internally consistent

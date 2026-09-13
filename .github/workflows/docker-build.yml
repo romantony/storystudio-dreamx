@@ -3,6 +3,11 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'refiner/**'
+      - '.github/workflows/docker-build-refiner.yml'
+      - 'scripts/test_refiner.py'
   workflow_dispatch:
 
 env:
