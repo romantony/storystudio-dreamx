@@ -50,6 +50,14 @@ def build_base_args() -> SimpleNamespace:
         transformer_path=os.path.join(MODEL_PATH, "creator"),
         audio_vae_path=os.path.join(MODEL_PATH, "audio_vae"),
         negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+        # inference.py's generate_joint_audio_video() reads these off `args`
+        # as item.get(key, args.<key>) fallback defaults — Python evaluates
+        # that default eagerly, so args.duration/seed/image must exist even
+        # though generate() below always supplies them in `item` too and
+        # these values are never actually used.
+        duration=5.0,
+        seed=42,
+        image=None,
         target_spatial_tokens=int(os.getenv("TARGET_SPATIAL_TOKENS", "880")),
         min_token_ratio=0.95,
         fps=int(os.getenv("OUTPUT_FPS", "24")),
@@ -187,6 +195,11 @@ class ModelServer:
                     if not chunk:
                         break
                     data += chunk
+                if not data.strip():
+                    # handler.py's readiness probe connects and closes without
+                    # sending anything — not an error, just nothing to do.
+                    conn.close()
+                    continue
                 request = json.loads(data.decode().strip())
                 print(f"Job received: {request.get('job_id')}", flush=True)
                 result = self.generate(request)
