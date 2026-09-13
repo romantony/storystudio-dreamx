@@ -26,7 +26,6 @@ MODEL_PATH = os.getenv("MODEL_PATH", "/runpod-volume/dreamx-creator")
 SOCKET_PATH = "/tmp/dreamx_model_server.sock"
 
 import torch  # noqa: E402
-from torchvision.io import write_video  # noqa: E402
 
 from inference import (  # noqa: E402
     DEFAULT_NEGATIVE_PROMPT,
@@ -85,6 +84,25 @@ def build_base_args() -> SimpleNamespace:
         disable_a2v_cross_attn=False,
         disable_v2a_cross_attn=False,
     )
+
+
+def encode_mp4(frames, fps: int, audio_path: str, output_path: str) -> None:
+    """Encode RGB frames [T,H,W,3] uint8 + WAV into one MP4 in a single ffmpeg pass.
+    torchvision's write_video fell back to a ~1 Mbps bitrate, which left heavy
+    macroblocking on high-motion clips; CRF keeps quality constant instead."""
+    t, h, w, _ = frames.shape
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-",
+         "-i", audio_path,
+         "-c:v", "libx264", "-crf", os.getenv("VIDEO_CRF", "18"), "-preset", "medium",
+         "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "128k",
+         "-movflags", "+faststart", output_path],
+        input=frames.tobytes(), capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg encode failed: {result.stderr.decode(errors='replace').strip()}")
 
 
 def drop_page_cache(root: str) -> None:
@@ -180,20 +198,11 @@ class ModelServer:
             args, self.models, self.device, self.weight_dtype, item)
 
         output_path = params["output_path"]
-        video_path = os.path.splitext(output_path)[0] + ".video.mp4"
         audio_path = os.path.splitext(output_path)[0] + ".wav"
 
         frames = (video_decoded[0].permute(1, 2, 3, 0).clamp(0, 1).cpu().numpy() * 255).astype("uint8")
-        write_video(video_path, torch.from_numpy(frames), fps=args.fps, video_codec="h264")
         save_audio_wav(audio_decoded, int(self.models["audio_vae"].sample_rate), audio_path)
-
-        mux = subprocess.run(
-            ["ffmpeg", "-y", "-i", video_path, "-i", audio_path,
-             "-c:v", "copy", "-c:a", "aac", "-shortest", output_path],
-            check=False, capture_output=True, text=True,
-        )
-        if mux.returncode != 0:
-            raise RuntimeError(f"ffmpeg mux failed: {mux.stderr.strip()}")
+        encode_mp4(frames, args.fps, audio_path, output_path)
 
         torch.cuda.empty_cache()
         return {

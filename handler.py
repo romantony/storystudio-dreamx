@@ -61,60 +61,6 @@ DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "50"))
 model_server_process = None
 
 
-def _read(path: str):
-    try:
-        return Path(path).read_text().strip()
-    except OSError:
-        return None
-
-
-def _gb(value) -> str:
-    try:
-        return f"{int(value) / 1024 ** 3:.1f}GB"
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def resource_snapshot() -> str:
-    parts = []
-    usage, limit = _read("/sys/fs/cgroup/memory.current"), _read("/sys/fs/cgroup/memory.max")
-    stat_path, anon_key, file_key = "/sys/fs/cgroup/memory.stat", "anon", "file"
-    if usage is None:  # cgroup v1
-        usage = _read("/sys/fs/cgroup/memory/memory.usage_in_bytes")
-        limit = _read("/sys/fs/cgroup/memory/memory.limit_in_bytes")
-        stat_path, anon_key, file_key = "/sys/fs/cgroup/memory/memory.stat", "total_rss", "total_cache"
-    if usage is not None:
-        parts.append(f"cgroup_mem={_gb(usage)}/{_gb(limit)}")
-    stat = dict(line.split() for line in (_read(stat_path) or "").splitlines() if len(line.split()) == 2)
-    if stat:
-        parts.append(f"anon={_gb(stat.get(anon_key))} file_cache={_gb(stat.get(file_key))}")
-    meminfo = dict(line.split(":", 1) for line in (_read("/proc/meminfo") or "").splitlines() if ":" in line)
-    if meminfo:
-        parts.append(f"host_avail={meminfo['MemAvailable'].strip()}/{meminfo['MemTotal'].strip()}")
-    try:
-        gpu = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total,utilization.gpu", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        parts.append(f"gpu={gpu}")
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return " | ".join(parts)
-
-
-def start_resource_monitor(interval_s: int = 5):
-    # Workers have been receiving SIGTERM with no error reported; log memory
-    # so the last lines before "Kill worker." show whether it's memory pressure.
-    import threading
-
-    def loop():
-        while True:
-            print(f"[Resources] {resource_snapshot()}", flush=True)
-            time.sleep(interval_s)
-
-    threading.Thread(target=loop, daemon=True).start()
-
-
 def verify_model_present():
     """Confirm the Creator generator + T5/VAE deps exist on the network volume."""
     required = Path(MODEL_PATH) / "wan2.2_ti2v_5b" / "models_t5_umt5-xxl-enc-bf16.pth"
@@ -385,7 +331,6 @@ print("=" * 60)
 print("DreamX-Creator 1.0 Base Audio-Video Handler — RTX 6000 Ada")
 print("=" * 60)
 
-start_resource_monitor()
 verify_model_present()
 start_model_server()
 

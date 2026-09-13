@@ -200,6 +200,7 @@ docker push <dockerhub-user>/dreamx-creator-base:latest
 | `VIDEOX_ATTENTION_TYPE` | `SAGE_ATTENTION` | SageAttention 2.2 (built for Ada 8.9 / Blackwell 12.0); set `FLASH_ATTENTION` to fall back to PyTorch SDPA |
 | `TARGET_SPATIAL_TOKENS` | `880` | Repo default spatial-token budget for the resized first frame |
 | `OUTPUT_FPS` | `24` | Repo default |
+| `VIDEO_CRF` | `18` | libx264 quality for the output MP4 (lower = higher quality, larger file; ~23 is visibly softer) |
 | `DEFAULT_STEPS` | `50` | Steps used when a request omits `num_inference_steps` |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PUBLIC_URL` | see `handler.py` | Cloudflare R2 upload target |
 
