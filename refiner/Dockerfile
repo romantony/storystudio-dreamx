@@ -38,11 +38,12 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
     "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1%2Bcu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" && \
     python3 -m pip cache purge
 
-RUN cd /workspace/dreamx-creator/video_refiner && DISABLE_FLEX_COMPILE=1 python3 -c "\
-import torch, flash_attn, triton, runpod; \
+# Upstream's own modules can't be imported here: wan/modules/t5.py calls
+# torch.cuda.current_device() at import time, which needs a GPU.
+RUN python3 -c "\
+import torch, flash_attn, triton, runpod, peft, ftfy, einops, omegaconf; \
 from torchvision.io import read_video; \
 assert torch._C._GLIBCXX_USE_CXX11_ABI, 'flash-attn wheel needs the cxx11 ABI torch build'; \
-import pipeline_sr.causal_inference, wan.modules.sr_dit.models, utils.sr_dit_wrapper; \
 print(f'OK — torch={torch.__version__} flash_attn={flash_attn.__version__} triton={triton.__version__} runpod={runpod.__version__}')"
 
 # Upstream resolves weights via ../checkpoints/{refiner,wan2.2_ti2v_5b}; point that
