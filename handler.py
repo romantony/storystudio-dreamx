@@ -14,6 +14,7 @@ os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')
 os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
 
 import sys
+import random
 import asyncio
 import runpod
 import subprocess
@@ -54,6 +55,7 @@ MAX_DURATION_S = 8.0
 # checkpoint has been released yet.
 MIN_STEPS = 10
 MAX_STEPS = 100
+DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "50"))
 
 # Global state
 model_server_process = None
@@ -281,9 +283,13 @@ def generate_video(job: Dict[str, Any]) -> Dict[str, Any]:
         prompt = job_input["prompt"]
         negative_prompt = job_input.get("negative_prompt")
         duration = float(job_input.get("duration_s", 5.0))
-        num_inference_steps = int(job_input.get("num_inference_steps", 50))
+        num_inference_steps = int(job_input.get("num_inference_steps") or DEFAULT_STEPS)
         guidance_scale = float(job_input.get("guidance_scale", 5.0))
-        seed = int(job_input.get("seed", 42))
+        # A fixed default seed would make every request with the same image and
+        # prompt produce the same clip; pick one per job and return it instead.
+        seed = job_input.get("seed")
+        seed = random.randint(0, 2**31 - 1) if seed is None else int(seed)
+        print(f"Seed: {seed} | steps: {num_inference_steps}")
 
         if not (MIN_DURATION_S <= duration <= MAX_DURATION_S):
             return {"error": f"duration_s must be between {MIN_DURATION_S} and {MAX_DURATION_S}"}
@@ -358,6 +364,7 @@ def generate_video(job: Dict[str, Any]) -> Dict[str, Any]:
                 "video_size_mb": video_size_mb,
                 "duration_s": duration,
                 "num_inference_steps": num_inference_steps,
+                "seed": seed,
             }
 
     except Exception as e:

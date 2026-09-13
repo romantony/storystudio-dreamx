@@ -84,9 +84,11 @@ def main() -> None:
                          help="Describes both motion/action AND sound (audio is generated jointly).")
     parser.add_argument("--negative-prompt", default=None)
     parser.add_argument("--duration", type=float, default=5.0, help="Clip length in seconds (2.0-8.0).")
-    parser.add_argument("--steps", type=int, default=50, help="num_inference_steps (10-100).")
+    parser.add_argument("--steps", type=int, default=None,
+                         help="num_inference_steps (10-100). Omit to use the endpoint's DEFAULT_STEPS.")
     parser.add_argument("--guidance", type=float, default=5.0, help="Text CFG scale.")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=None,
+                         help="Omit for a random seed (returned in the output); pass one to reproduce a clip.")
     parser.add_argument("--project-id", default=None)
     parser.add_argument("--frame-id", default=None)
     parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID", DEFAULT_ENDPOINT_ID))
@@ -110,10 +112,12 @@ def main() -> None:
         "image": load_image_input(args.image),
         "prompt": args.prompt,
         "duration_s": args.duration,
-        "num_inference_steps": args.steps,
         "guidance_scale": args.guidance,
-        "seed": args.seed,
     }
+    if args.steps is not None:
+        payload["num_inference_steps"] = args.steps
+    if args.seed is not None:
+        payload["seed"] = args.seed
     if args.negative_prompt:
         payload["negative_prompt"] = args.negative_prompt
     if args.project_id:
@@ -141,6 +145,7 @@ def main() -> None:
         sys.exit(1)
     if isinstance(output, dict) and output.get("video_url"):
         print(f"\nvideo_url: {output['video_url']}")
+        print(f"seed: {output.get('seed')} | steps: {output.get('num_inference_steps')}")
 
 
 if __name__ == "__main__":

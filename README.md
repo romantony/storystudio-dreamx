@@ -144,9 +144,9 @@ curl -X POST https://api.runpod.ai/v2/{endpoint_id}/run \
 | `prompt` | string | ✅ | - | Describes both motion/action AND sound — this model generates audio jointly, so mention diegetic sound in the prompt |
 | `negative_prompt` | string | ❌ | repo default | |
 | `duration_s` | float | ❌ | 5.0 | Clamped to 2.0–8.0s; only 5.0 is officially validated (Verse-Bench default) |
-| `num_inference_steps` | int | ❌ | 50 | Clamped to 10–100; below 50 is unverified quality (no distilled checkpoint exists) |
+| `num_inference_steps` | int | ❌ | `DEFAULT_STEPS` (50) | Clamped to 10–100; below 50 is unverified quality (no distilled checkpoint exists) |
 | `guidance_scale` | float | ❌ | 5.0 | Text CFG scale |
-| `seed` | int | ❌ | 42 | |
+| `seed` | int | ❌ | random | Omit for a random seed per job; the seed used is returned in the response so a clip can be reproduced |
 | `project_id` / `frame_id` | string | ❌ | - | Used for the R2 asset key when both given; falls back to timestamp+job_id |
 
 ### Response
@@ -158,7 +158,8 @@ curl -X POST https://api.runpod.ai/v2/{endpoint_id}/run \
   "model_generation_time": 395.0,
   "video_size_mb": 8.1,
   "duration_s": 5.0,
-  "num_inference_steps": 50
+  "num_inference_steps": 50,
+  "seed": 1834920571
 }
 ```
 
@@ -199,7 +200,7 @@ docker push <dockerhub-user>/dreamx-creator-base:latest
 | `VIDEOX_ATTENTION_TYPE` | `SAGE_ATTENTION` | SageAttention 2.2 (built for Ada 8.9 / Blackwell 12.0); set `FLASH_ATTENTION` to fall back to PyTorch SDPA |
 | `TARGET_SPATIAL_TOKENS` | `880` | Repo default spatial-token budget for the resized first frame |
 | `OUTPUT_FPS` | `24` | Repo default |
-| `DEFAULT_STEPS` | `50` | Repo default; per-job `num_inference_steps` overrides this |
+| `DEFAULT_STEPS` | `50` | Steps used when a request omits `num_inference_steps` |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PUBLIC_URL` | see `handler.py` | Cloudflare R2 upload target |
 
 ## Status
