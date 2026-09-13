@@ -55,7 +55,7 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
 
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
     -r /workspace/dreamx-creator/audio_video_generation/requirements.txt \
-    runpod==1.7.5 boto3==1.35.76 requests==2.32.3 && \
+    runpod==1.12.0 boto3 requests && \
     python3 -m pip cache purge
 
 RUN python3 -c "import runpod, torch, torchvision, diffusers, transformers; \
