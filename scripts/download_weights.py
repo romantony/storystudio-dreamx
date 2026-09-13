@@ -2,8 +2,9 @@
 """
 Download DreamX-Creator 1.0's base-generator weights onto a RunPod network
 volume: the creator/ (7B joint AV DiT), audio_vae/, and wan2.2_ti2v_5b/
-(shared video VAE + T5-XXL + tokenizer) directories from GD-ML/DreamX-Creator
-on Hugging Face. Total ~43 GB with default flags.
+(shared video VAE + T5-XXL + tokenizer) directories from GD-ML/DreamX-Creator,
+mirrored identically (same paths, same byte sizes, confirmed against both
+APIs) on Hugging Face and ModelScope. Total ~43 GB with default flags.
 
 The refiner/ directory (2K refiner, ~11 GB) is NOT fetched by default — this
 worker is base-generator-only (see README.md). Pass --include-refiner if you
@@ -20,42 +21,60 @@ on this pod, it will show up at /runpod-volume/dreamx-creator for the
 deployed worker. Check `df -h` / `mount` on your pod to confirm where the
 network volume is actually mounted before running this.
 
-    pip install -U "huggingface_hub[cli]" hf_xet
-    python3 scripts/download_weights.py --dest /workspace/dreamx-creator
+Two sources are supported via --source:
 
-Safe to re-run: huggingface_hub's snapshot_download skips files that are
-already fully downloaded and resumes partial ones, so an interrupted run
+    modelscope (default — Hugging Face has been very slow for this repo):
+        pip install -U modelscope
+        python3 scripts/download_weights.py --dest /workspace/dreamx-creator
+
+    hf:
+        pip install -U "huggingface_hub[cli]" hf_xet
+        python3 scripts/download_weights.py --source hf --dest /workspace/dreamx-creator
+
+Pass --clean to wipe --dest before downloading (e.g. to discard a stalled
+partial HF download before switching sources) — it prompts for confirmation
+unless --yes is also given.
+
+Safe to re-run otherwise: both backends' snapshot_download skip files that
+are already fully downloaded and resume partial ones, so an interrupted run
 (or a rerun with --include-refiner added later) won't re-fetch what's
 already there.
 
-Speed: `creator/video_model`'s two shards and the T5 checkpoint are each
-~10-11GB single files, and this repo is Xet-enabled. This script
-auto-detects and enables the fastest available transfer backend:
-- `hf_xet` installed -> sets HF_XET_HIGH_PERFORMANCE=1 (current
-  huggingface_hub releases use Xet as the fast path; this is the one to
-  install today — `pip install hf_xet`).
-- `hf_transfer` installed instead (older huggingface_hub only) ->
-  sets HF_HUB_ENABLE_HF_TRANSFER=1.
-- Neither installed -> falls back to a single HTTP connection per file,
-  which on many hosts caps out well under the link's real bandwidth.
-If downloads are still slow with a fast backend enabled, the bottleneck is
-more likely the network volume's own write throughput (RunPod network
-volumes are NFS-backed and can be slower than local/ephemeral disk) rather
-than the download itself — in that case, download to local disk first
-(e.g. --dest /root/dreamx-staging) and copy/rsync to the network volume
-path afterward as one large sequential write.
+Speed notes:
+- ModelScope: no separate fast-transfer package needed; concurrency is
+  controlled by --max-workers (default 8).
+- Hugging Face: `creator/video_model`'s two shards and the T5 checkpoint are
+  each ~10-11GB single files, and this repo is Xet-enabled. This script
+  auto-detects and enables the fastest available transfer backend:
+  - `hf_xet` installed -> sets HF_XET_HIGH_PERFORMANCE=1 (current
+    huggingface_hub releases use Xet as the fast path; this is the one to
+    install today — `pip install hf_xet`).
+  - `hf_transfer` installed instead (older huggingface_hub only) ->
+    sets HF_HUB_ENABLE_HF_TRANSFER=1.
+  - Neither installed -> falls back to a single HTTP connection per file,
+    which on many hosts caps out well under the link's real bandwidth.
+
+If downloads are still slow with a fast backend/high concurrency enabled,
+the bottleneck is more likely the network volume's own write throughput
+(RunPod network volumes are NFS-backed and can be slower than local/
+ephemeral disk) rather than the download itself — in that case, download to
+local disk first (e.g. --dest /root/dreamx-staging) and copy/rsync to the
+network volume path afterward as one large sequential write.
 """
 import argparse
 import os
+import shutil
 import time
 from pathlib import Path
 
-# GD-ML/DreamX-Creator is Xet-enabled (confirmed via the HF API). Current
-# huggingface_hub releases (>=1.x, and recent 0.3x) use Xet as the fast-path
-# transfer backend and have dropped hf_transfer — setting
+# GD-ML/DreamX-Creator is Xet-enabled on Hugging Face (confirmed via the HF
+# API). Current huggingface_hub releases (>=1.x, and recent 0.3x) use Xet as
+# the fast-path transfer backend and have dropped hf_transfer — setting
 # HF_HUB_ENABLE_HF_TRANSFER on those versions now only prints a
 # FutureWarning and does nothing. Detect which backend is actually
-# available and set only the variable that backend honors.
+# available and set only the variable that backend honors. (Only relevant
+# for --source hf; ModelScope has its own transfer path, tuned via
+# --max-workers instead.)
 _FAST_TRANSFER = None
 try:
     import hf_xet  # noqa: F401
@@ -99,9 +118,46 @@ def dir_stats(path: Path) -> tuple[int, float]:
     return len(files), total_bytes / 1024 ** 3
 
 
-def download(dest: Path, include_refiner: bool) -> None:
+def clean_dest(dest: Path, yes: bool) -> None:
+    if not dest.exists() or not any(dest.iterdir()):
+        return
+    n_files, size_gb = dir_stats(dest)
+    print(f"--clean: {dest} already contains {n_files} files ({size_gb:.2f} GB).")
+    if not yes:
+        resp = input(f"Delete everything under {dest} before downloading? [y/N] ").strip().lower()
+        if resp != "y":
+            print("Aborted — not deleting, not downloading.")
+            raise SystemExit(1)
+    print(f"Removing {dest} ...")
+    shutil.rmtree(dest)
+
+
+def download_hf(dest: Path, patterns: list[str]) -> None:
     from huggingface_hub import snapshot_download
 
+    print(f"Source: Hugging Face ({REPO_ID})")
+    print(f"Fast transfer: {_FAST_TRANSFER or 'OFF — pip install hf_xet for faster large-file downloads'}")
+    snapshot_download(
+        repo_id=REPO_ID,
+        local_dir=str(dest),
+        allow_patterns=patterns,
+    )
+
+
+def download_modelscope(dest: Path, patterns: list[str], max_workers: int) -> None:
+    from modelscope import snapshot_download
+
+    print(f"Source: ModelScope ({REPO_ID})")
+    print(f"Concurrency: max_workers={max_workers}")
+    snapshot_download(
+        model_id=REPO_ID,
+        local_dir=str(dest),
+        allow_patterns=patterns,
+        max_workers=max_workers,
+    )
+
+
+def download(dest: Path, include_refiner: bool, source: str, max_workers: int) -> None:
     dest.mkdir(parents=True, exist_ok=True)
 
     patterns = list(BASE_PATTERNS)
@@ -109,16 +165,14 @@ def download(dest: Path, include_refiner: bool) -> None:
         patterns += REFINER_PATTERNS
 
     print(f"Downloading {REPO_ID} -> {dest}")
-    print(f"Fast transfer: {_FAST_TRANSFER or 'OFF — pip install hf_xet for faster large-file downloads'}")
     for p in patterns:
         print(f"  {p}")
 
     start = time.time()
-    snapshot_download(
-        repo_id=REPO_ID,
-        local_dir=str(dest),
-        allow_patterns=patterns,
-    )
+    if source == "modelscope":
+        download_modelscope(dest, patterns, max_workers)
+    else:
+        download_hf(dest, patterns)
     elapsed = time.time() - start
 
     print(f"\nDone in {elapsed/60:.1f} min. Verifying contents of {dest}:\n")
@@ -163,8 +217,37 @@ def main() -> None:
         help="Also fetch refiner/ (~11 GB, SR-DiT 5B + upsamplers) for the 2K refiner stage. "
              "Not used by this worker's base-generator-only handler.",
     )
+    parser.add_argument(
+        "--source",
+        choices=["modelscope", "hf"],
+        default=os.getenv("DOWNLOAD_SOURCE", "modelscope"),
+        help="Which host to download from (default: $DOWNLOAD_SOURCE or modelscope — "
+             "Hugging Face has been very slow for this repo from some regions). "
+             "Both mirror the exact same file layout and byte sizes.",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=8,
+        help="Parallel download workers for --source modelscope (default: 8). Ignored for hf.",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete everything already under --dest before downloading (e.g. to discard a "
+             "stalled/partial download from a different source). Prompts for confirmation "
+             "unless --yes is also passed.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt for --clean.",
+    )
     args = parser.parse_args()
-    download(Path(args.dest), args.include_refiner)
+    dest = Path(args.dest)
+    if args.clean:
+        clean_dest(dest, args.yes)
+    download(dest, args.include_refiner, args.source, args.max_workers)
 
 
 if __name__ == "__main__":

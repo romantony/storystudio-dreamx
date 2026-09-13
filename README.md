@@ -70,9 +70,13 @@ DiTs, which *were* trained for exactly 4 steps).
 
 ## Model Files (Network Volume)
 
-Download source: [`GD-ML/DreamX-Creator`](https://huggingface.co/GD-ML/DreamX-Creator)
-(Apache 2.0), ~55GB total. Place under `MODEL_PATH` (default
-`/runpod-volume/dreamx-creator`):
+Download source: `GD-ML/DreamX-Creator` (Apache 2.0), ~55GB total, mirrored
+identically (same paths, same byte sizes) on both
+[Hugging Face](https://huggingface.co/GD-ML/DreamX-Creator) and
+[ModelScope](https://modelscope.cn/models/GD-ML/DreamX-Creator) — use
+whichever is faster from your pod's region (Hugging Face has been very slow
+for this repo from some regions; ModelScope is the default below). Place
+under `MODEL_PATH` (default `/runpod-volume/dreamx-creator`):
 
 ```
 dreamx-creator/
@@ -98,14 +102,22 @@ interactive Pods often mount the volume at `/workspace`, while
 Serverless endpoint itself mounts the volume at `/runpod-volume`.
 
 ```bash
-pip install -U "huggingface_hub[cli]"
+# ModelScope (default source)
+pip install -U modelscope
 python3 scripts/download_weights.py --dest /path/to/network/volume/dreamx-creator
+
+# Hugging Face
+pip install -U "huggingface_hub[cli]" hf_xet
+python3 scripts/download_weights.py --source hf --dest /path/to/network/volume/dreamx-creator
 ```
 
 See [`scripts/download_weights.py`](./scripts/download_weights.py) for
 details — it verifies file counts per directory after download and is safe
 to re-run (resumes rather than restarting). Pass `--include-refiner` if you
-later add the 2K refiner stage and want its weights fetched too.
+later add the 2K refiner stage and want its weights fetched too. Pass
+`--clean` to wipe `--dest` first (e.g. to discard a stalled/partial download
+before switching sources) — it prompts for confirmation unless `--yes` is
+also given.
 
 ## API Usage
 

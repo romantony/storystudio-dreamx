@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Check download progress of DreamX-Creator weights against the exact file
-manifest from GD-ML/DreamX-Creator on Hugging Face — run this anytime,
-including while download_weights.py is still running, to see what's done,
-what's partial, and what's still missing.
+manifest from GD-ML/DreamX-Creator — the paths and byte sizes below are
+identical on Hugging Face and ModelScope (confirmed against both APIs), so
+this check works regardless of which --source download_weights.py used.
+Run this anytime, including while download_weights.py is still running, to
+see what's done, what's partial, and what's still missing.
 
 Usage (on the pod, pointed at the same --dest used for download_weights.py):
     python3 scripts/check_download.py --dest /workspace/dreamx-creator
