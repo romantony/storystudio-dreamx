@@ -14,6 +14,7 @@ os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')
 os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
 
 import sys
+import asyncio
 import runpod
 import subprocess
 import tempfile
@@ -312,6 +313,13 @@ def generate_video(job: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+async def async_handler(job: Dict[str, Any]) -> Dict[str, Any]:
+    # The RunPod SDK runs job-take and its HTTP session on one asyncio loop and
+    # calls sync handlers directly on it, so a multi-minute blocking handler
+    # stalls that loop for the whole generation. Run the work in a thread.
+    return await asyncio.to_thread(generate_video, job)
+
+
 print("=" * 60)
 print("DreamX-Creator 1.0 Base Audio-Video Handler — RTX 6000 Ada")
 print("=" * 60)
@@ -322,4 +330,4 @@ start_model_server()
 print("✓ Handler ready with warm model!")
 print("=" * 60)
 
-runpod.serverless.start({"handler": generate_video})
+runpod.serverless.start({"handler": async_handler})
