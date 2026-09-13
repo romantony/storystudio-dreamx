@@ -49,14 +49,28 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
     --index-url https://download.pytorch.org/whl/cu128 && \
     python3 -m pip cache purge
 
-# flash-attn / sageattention are optional per the repo's own requirements.txt
-# (PyTorch SDPA is the fallback); skip them for the initial build to keep it
-# simple. Revisit if profiling shows attention is the bottleneck.
-
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
     -r /workspace/dreamx-creator/audio_video_generation/requirements.txt \
     runpod==1.12.0 boto3 requests && \
     python3 -m pip cache purge
+
+# SageAttention 2.2 (not on PyPI; 1.0.6 there is the slower Triton-only v1).
+# Built for Ada (8.9, RTX 6000 Ada) and Blackwell (12.0, RTX PRO 6000) via
+# TORCH_CUDA_ARCH_LIST since CI has no GPU. Low parallelism keeps nvcc within
+# the GitHub runner's 16GB RAM. gcc and python3.12-dev stay installed: Triton
+# JIT-compiles SageAttention's quantization kernels at runtime.
+ENV SAGEATTENTION_COMMIT=d1a57a546c3d395b1ffcbeecc66d81db76f3b4b5
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3.12-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    python3 -m pip install --no-cache-dir --break-system-packages ninja packaging setuptools wheel && \
+    git clone https://github.com/thu-ml/SageAttention.git /tmp/SageAttention && \
+    cd /tmp/SageAttention && git checkout ${SAGEATTENTION_COMMIT} && \
+    TORCH_CUDA_ARCH_LIST="8.9;12.0" EXT_PARALLEL=1 MAX_JOBS=2 NVCC_APPEND_FLAGS="--threads 2" \
+    python3 -m pip install --no-cache-dir --break-system-packages --no-build-isolation . && \
+    cd / && rm -rf /tmp/SageAttention && python3 -m pip cache purge && \
+    python3 -c "from sageattention import core; \
+assert core.SM80_ENABLED and core.SM89_ENABLED, 'SageAttention CUDA kernels failed to import'; \
+print('SageAttention kernels OK')"
 
 RUN python3 -c "import runpod, torch, torchvision, diffusers, transformers; \
 print(f'OK — runpod={runpod.__version__} torch={torch.__version__} cuda={torch.version.cuda}'); \
@@ -65,6 +79,10 @@ assert torch.version.cuda.startswith('12'), f'torch CUDA build {torch.version.cu
 RUN test -f /workspace/dreamx-creator/audio_video_generation/inference.py && \
     test -d /workspace/dreamx-creator/audio_video_generation/videox_fun && \
     echo "DreamX-Creator source OK"
+
+# DreamX's attention_utils picks the backend from this; override to
+# FLASH_ATTENTION on the endpoint to fall back to PyTorch SDPA without a rebuild.
+ENV VIDEOX_ATTENTION_TYPE=SAGE_ATTENTION
 
 COPY handler.py /workspace/handler.py
 COPY model_server.py /workspace/model_server.py

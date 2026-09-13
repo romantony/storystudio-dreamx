@@ -196,6 +196,7 @@ docker push <dockerhub-user>/dreamx-creator-base:latest
 |---|---|---|
 | `MODEL_PATH` | `/runpod-volume/dreamx-creator` | Root dir for creator/audio_vae/wan2.2_ti2v_5b |
 | `GPU_MEMORY_MODE` | `model_full_load` | `model_cpu_offload` also offloads the DiT to host RAM each job (see VRAM budget) |
+| `VIDEOX_ATTENTION_TYPE` | `SAGE_ATTENTION` | SageAttention 2.2 (built for Ada 8.9 / Blackwell 12.0); set `FLASH_ATTENTION` to fall back to PyTorch SDPA |
 | `TARGET_SPATIAL_TOKENS` | `880` | Repo default spatial-token budget for the resized first frame |
 | `OUTPUT_FPS` | `24` | Repo default |
 | `DEFAULT_STEPS` | `50` | Repo default; per-job `num_inference_steps` overrides this |

@@ -115,11 +115,15 @@ class ModelServer:
 
     def load_model(self):
         print(f"PyTorch {torch.__version__} | CUDA {torch.version.cuda}")
-        try:
-            import flash_attn
-            print(f"FlashAttention available: v{flash_attn.__version__}")
-        except ImportError:
-            print("FlashAttention NOT installed — attention falls back to PyTorch SDPA")
+        from videox_fun.models import attention_utils
+        requested = os.environ.get("VIDEOX_ATTENTION_TYPE", "FLASH_ATTENTION")
+        if requested == "SAGE_ATTENTION" and attention_utils.SAGE_ATTENTION_AVAILABLE:
+            print("Attention backend: SageAttention")
+        elif requested == "FLASH_ATTENTION" and (
+                attention_utils.FLASH_ATTN_2_AVAILABLE or attention_utils.FLASH_ATTN_3_AVAILABLE):
+            print("Attention backend: FlashAttention")
+        else:
+            print(f"WARNING: attention backend {requested} unavailable — using PyTorch SDPA")
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
         print(f"VRAM: {vram_gb:.1f} GB")
