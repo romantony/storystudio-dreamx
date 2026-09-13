@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MODEL_PATH=/runpod-volume/dreamx-creator \
     HF_HOME=/runpod-volume/huggingface \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    GPU_MEMORY_MODE=model_cpu_offload
+    GPU_MEMORY_MODE=model_full_load
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.12 python3.12-venv python3-pip \

@@ -70,16 +70,14 @@ def build_base_args() -> SimpleNamespace:
         audio_shift=5.0,
         sampler_name="Flow",
         weight_dtype="bfloat16",
-        # model_cpu_offload keeps only the ~14GB creator DiT resident; T5 and
-        # both VAEs stay on CPU except during their brief encode/decode phase.
-        # On the RTX 6000 Ada (47.4GB) this leaves ample headroom for
-        # activations even before considering model_full_load. Override to
-        # model_full_load only if warm-start latency (T5/VAE re-transfer per
-        # job) turns out to dominate wall time in practice.
-        GPU_memory_mode=os.getenv("GPU_MEMORY_MODE", "model_cpu_offload"),
-        text_encoder_cpu_offload=None,
-        video_vae_cpu_offload=None,
-        audio_vae_cpu_offload=None,
+        # In inference.py, model_cpu_offload also offloads the ~14GB (bf16)
+        # creator DiT, keeping it in host RAM and copying it to/from the GPU
+        # every job. model_full_load + explicit per-module flags keeps the DiT
+        # resident on the GPU and stages only T5/VAEs, cutting host RAM use.
+        GPU_memory_mode=os.getenv("GPU_MEMORY_MODE", "model_full_load"),
+        text_encoder_cpu_offload=True,
+        video_vae_cpu_offload=True,
+        audio_vae_cpu_offload=True,
         vae_cpu_offload=None,
         use_temporal_rope=True,
         audio_fps=48000.0 / 960.0,
@@ -87,6 +85,25 @@ def build_base_args() -> SimpleNamespace:
         disable_a2v_cross_attn=False,
         disable_v2a_cross_attn=False,
     )
+
+
+def drop_page_cache(root: str) -> None:
+    """Weights are fully copied into tensors by now; evict their file pages so
+    ~40GB of checkpoint page cache doesn't count against the worker's memory."""
+    dropped = 0
+    for p in Path(root).rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            fd = os.open(p, os.O_RDONLY)
+            try:
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                dropped += 1
+            finally:
+                os.close(fd)
+        except OSError as e:
+            print(f"page cache drop skipped for {p}: {e}")
+    print(f"Dropped page cache for {dropped} checkpoint files", flush=True)
 
 
 class ModelServer:
@@ -122,6 +139,7 @@ class ModelServer:
         offload_flags = resolve_cpu_offload_flags(self.base_args)
         print(
             "CPU offload: "
+            f"transformer={offload_flags['transformer']} "
             f"text_encoder={offload_flags['text_encoder']} "
             f"video_vae={offload_flags['video_vae']} "
             f"audio_vae={offload_flags['audio_vae']}"
@@ -133,6 +151,7 @@ class ModelServer:
         allocated = torch.cuda.memory_allocated() / 1024 ** 3
         reserved = torch.cuda.memory_reserved() / 1024 ** 3
         print(f"✓ Model ready in {elapsed:.1f}s — {allocated:.1f} GB alloc / {reserved:.1f} GB reserved")
+        drop_page_cache(MODEL_PATH)
 
     def generate(self, params: dict) -> dict:
         t0 = time.time()

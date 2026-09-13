@@ -23,8 +23,11 @@ behind the estimate and how to validate it.
 
 ## VRAM budget (RTX 6000 Ada, 47.4 GB)
 
-Checkpoint sizes (bf16, as loaded for inference) with
-`GPU_MEMORY_MODE=model_cpu_offload` (the default in this worker):
+Checkpoint sizes (bf16, as loaded for inference) with this worker's default
+of `GPU_MEMORY_MODE=model_full_load` plus explicit T5/VAE CPU offload flags
+(set in `model_server.py`). Note that upstream's `model_cpu_offload` also
+offloads the DiT itself, keeping it in host RAM and copying it to the GPU
+every job — avoid it on Serverless workers with limited RAM.
 
 | Component | Resident VRAM |
 |---|---|
@@ -41,10 +44,8 @@ activation memory during sampling is not published by the DreamX-Creator repo
 or paper** — confirm empirically on first deploy, the same way the Wan2.2
 worker's 113-frame cap was found by testing 5/6/7/8s clips until one OOM'd.
 
-If warm-start per-job latency from repeatedly staging T5/VAE to GPU turns out
-to dominate wall time, try `GPU_MEMORY_MODE=model_full_load` instead — full
-resident load is ~29 GB, still comfortably under 47.4 GB with no offload
-transfer overhead per job.
+T5 and the VAEs stay offloaded regardless of `GPU_MEMORY_MODE` (explicit
+flags in `model_server.py`); only the DiT placement changes.
 
 ## Expected performance (unverified — benchmark before production use)
 
@@ -194,7 +195,7 @@ docker push <dockerhub-user>/dreamx-creator-base:latest
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODEL_PATH` | `/runpod-volume/dreamx-creator` | Root dir for creator/audio_vae/wan2.2_ti2v_5b |
-| `GPU_MEMORY_MODE` | `model_cpu_offload` | `model_full_load` to keep T5+VAEs resident instead (see VRAM budget) |
+| `GPU_MEMORY_MODE` | `model_full_load` | `model_cpu_offload` also offloads the DiT to host RAM each job (see VRAM budget) |
 | `TARGET_SPATIAL_TOKENS` | `880` | Repo default spatial-token budget for the resized first frame |
 | `OUTPUT_FPS` | `24` | Repo default |
 | `DEFAULT_STEPS` | `50` | Repo default; per-job `num_inference_steps` overrides this |
