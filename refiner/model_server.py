@@ -82,6 +82,8 @@ def build_cli_args() -> list[str]:
 def write_video_crf(output_path, video, fps):
     """Drop-in for torchvision.io.write_video(path, uint8 [T,H,W,C], fps)."""
     t, h, w, _ = video.shape
+    t0 = time.time()
+    print(f"Encoding {t} frames at {w}x{h}...", flush=True)
     proc = subprocess.Popen(
         ["ffmpeg", "-y", "-loglevel", "error",
          "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(float(fps)), "-i", "-",
@@ -96,6 +98,7 @@ def write_video_crf(output_path, video, fps):
     stderr = proc.stderr.read().decode(errors="replace")
     if proc.wait() != 0:
         raise RuntimeError(f"ffmpeg encode failed: {stderr.strip()}")
+    print(f"Encoded in {time.time() - t0:.1f}s", flush=True)
 
 
 class RefinerServer:
@@ -148,9 +151,19 @@ class RefinerServer:
             pipeline.generator.to("cpu")
             torch.cuda.empty_cache()
             print(f"Offloaded DiT for decode in {time.time() - t_off:.1f}s", flush=True)
+            # Upstream's decode is silent; its decoder runs once per latent frame.
+            t_dec, n_frames, calls = time.time(), latent.shape[1], [0]
+
+            def report(*_):
+                calls[0] += 1
+                if calls[0] % 5 == 0 or calls[0] == n_frames:
+                    print(f"VAE decode {calls[0]}/{n_frames} latent frames ({time.time() - t_dec:.0f}s)", flush=True)
+
+            hook = pipeline.vae.model.decoder.register_forward_hook(report)
             try:
                 return decode_timed(pipeline, latent)
             finally:
+                hook.remove()
                 t_on = time.time()
                 pipeline.generator.to("cuda")
                 print(f"Restored DiT in {time.time() - t_on:.1f}s", flush=True)
