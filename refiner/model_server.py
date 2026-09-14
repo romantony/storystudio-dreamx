@@ -92,12 +92,18 @@ class RefinerServer:
         os.chdir(REFINER_ROOT)
         sys.path.insert(0, REFINER_ROOT)
 
+        volume = Path("/runpod-volume")
+        if not volume.is_dir() or not any(volume.iterdir()):
+            raise RuntimeError(
+                "/runpod-volume is missing or empty — attach the DreamX network volume "
+                "to this endpoint (Edit Endpoint → Advanced → Network Volume).")
         for rel in ("refiner/sr_dit_5b.pt", "refiner/latent_upsampler_flash.pt",
                     "wan2.2_ti2v_5b/models_t5_umt5-xxl-enc-bf16.pth", "wan2.2_ti2v_5b/Wan2.2_VAE.pth"):
             if not (Path("../checkpoints") / rel).exists():
+                listing = sorted(p.name for p in volume.iterdir())
                 raise RuntimeError(
-                    f"Missing {rel} on the network volume — download refiner/ with "
-                    "scripts/download_weights.py --include-refiner (see README.md).")
+                    f"Missing {rel} under /runpod-volume/dreamx-creator (volume root has: {listing}) — "
+                    "download refiner/ with scripts/download_weights.py --include-refiner (see README.md).")
         if REFINER_FAST and not Path("../checkpoints/refiner/lightvae_nu_scheme3.pt").exists():
             raise RuntimeError("REFINER_FAST=1 needs refiner/lightvae_nu_scheme3.pt on the volume")
 
