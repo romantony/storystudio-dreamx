@@ -248,7 +248,7 @@ Output: `video` / `video_url`, `upscale` (`"dreamx_sr_<H>p"`), `width`,
 |---|---|---|
 | `REFINER_FAST` | `0` | `1` = fp8 DiT + LightVAE-NU decoder (upstream: 155.8s -> 46.2s per clip, ~36 dB PSNR vs default) |
 | `REFINER_KV_LEN` | `3` | Rolling KV cache length in 3-frame chunks; VRAM scales with it (upstream: 9) |
-| `REFINER_WINDOW_CHUNK` | unset | Windows per batch in block-grid attention, to bound peak memory |
+| `REFINER_WINDOW_CHUNK` | not set (omit the variable) | Windows per batch in block-grid attention, to bound peak memory |
 | `VIDEO_CRF` | `18` | libx264 quality of the refined MP4 |
 | `MAX_INPUT_FRAMES` | `241` | Rejects longer inputs |
 

@@ -25,12 +25,23 @@ LOOP_MARKER = "# ── Inference loop ──"
 # Setup's "gather input videos" step only records this path; it is never read.
 PLACEHOLDER_INPUT = "/tmp/refiner_placeholder.mp4"
 
-REFINER_FAST = os.getenv("REFINER_FAST", "0") == "1"
-WINDOW_CHUNK = os.getenv("REFINER_WINDOW_CHUNK")
+
+def int_env(name: str, default):
+    """Positive int from the environment; blank or placeholder text means unset."""
+    raw = os.getenv(name, "").strip()
+    if raw.lower() in ("", "unset", "none", "default"):
+        return default
+    if not raw.isdigit() or int(raw) < 1:
+        raise RuntimeError(f"{name} must be a positive integer or left unset, got {raw!r}")
+    return int(raw)
+
+
+REFINER_FAST = os.getenv("REFINER_FAST", "0").strip() == "1"
+WINDOW_CHUNK = int_env("REFINER_WINDOW_CHUNK", None)
 # Rolling KV cache length in 3-latent-frame chunks. VRAM grows linearly with it:
 # upstream's 9 OOMs a 48GB card at 2496x1408 after 2 chunks (upstream suggests 6
 # for 960x1664, on a 96GB H20). Fewer chunks = less temporal context per chunk.
-KV_LEN = os.getenv("REFINER_KV_LEN", "3")
+KV_LEN = int_env("REFINER_KV_LEN", 3)
 
 
 def build_cli_args() -> list[str]:
@@ -47,7 +58,7 @@ def build_cli_args() -> list[str]:
         "--sr_scale", "2.0",
         "--causal",
         "--seed", "42",
-        "--kv_len", KV_LEN,
+        "--kv_len", str(KV_LEN),
         "--latent_upsampler_config", "configs/latent_upsampler_flash.yaml",
         "--latent_upsampler_ckpt", "../checkpoints/refiner/latent_upsampler_flash.pt",
         "--use_window_attn",
@@ -60,7 +71,7 @@ def build_cli_args() -> list[str]:
         "--lq_anchor_align", "frame",
     ]
     if WINDOW_CHUNK:
-        args += ["--window_chunk", WINDOW_CHUNK]
+        args += ["--window_chunk", str(WINDOW_CHUNK)]
     if REFINER_FAST:
         # Upstream benchmark: 3.4x faster end to end, ~36 dB PSNR vs the bf16 default.
         args += ["--enable_nu_lightvae", "--nu_lightvae_type", "scheme3",
