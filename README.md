@@ -224,9 +224,11 @@ python3 scripts/check_download.py --dest /workspace/dreamx-creator --include-ref
 
 **Endpoint:** image `romantony/dreamx-creator-refiner:latest`, the same network
 volume, the same R2 env vars, and an execution timeout of at least 1800s.
-Upstream only benchmarks 1248x704 -> 2K on an H20 (96 GB); peak VRAM on a 48 GB
-RTX 6000 Ada is unmeasured. If it OOMs, set `REFINER_WINDOW_CHUNK` (bounds
-window-attention memory) or use an RTX PRO 6000 (96 GB).
+Upstream only benchmarks 1248x704 -> 2K on an H20 (96 GB). With upstream's
+`kv_len=9`, a 48 GB card OOMs at 2496x1408 after 2 of 10 chunks: the rolling KV
+cache dominates VRAM, so this worker defaults to `REFINER_KV_LEN=3`. Each job logs
+`Peak VRAM x / y GB` — raise `REFINER_KV_LEN` while there is headroom (more
+temporal context), or use a 96 GB RTX PRO 6000 for upstream's 9.
 
 **API** (same shape as PostProd-Lite's `upscale` mode):
 
@@ -245,6 +247,7 @@ Output: `video` / `video_url`, `upscale` (`"dreamx_sr_<H>p"`), `width`,
 | Env var | Default | Purpose |
 |---|---|---|
 | `REFINER_FAST` | `0` | `1` = fp8 DiT + LightVAE-NU decoder (upstream: 155.8s -> 46.2s per clip, ~36 dB PSNR vs default) |
+| `REFINER_KV_LEN` | `3` | Rolling KV cache length in 3-frame chunks; VRAM scales with it (upstream: 9) |
 | `REFINER_WINDOW_CHUNK` | unset | Windows per batch in block-grid attention, to bound peak memory |
 | `VIDEO_CRF` | `18` | libx264 quality of the refined MP4 |
 | `MAX_INPUT_FRAMES` | `241` | Rejects longer inputs |

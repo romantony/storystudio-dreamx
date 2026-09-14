@@ -27,6 +27,10 @@ PLACEHOLDER_INPUT = "/tmp/refiner_placeholder.mp4"
 
 REFINER_FAST = os.getenv("REFINER_FAST", "0") == "1"
 WINDOW_CHUNK = os.getenv("REFINER_WINDOW_CHUNK")
+# Rolling KV cache length in 3-latent-frame chunks. VRAM grows linearly with it:
+# upstream's 9 OOMs a 48GB card at 2496x1408 after 2 chunks (upstream suggests 6
+# for 960x1664, on a 96GB H20). Fewer chunks = less temporal context per chunk.
+KV_LEN = os.getenv("REFINER_KV_LEN", "3")
 
 
 def build_cli_args() -> list[str]:
@@ -43,7 +47,7 @@ def build_cli_args() -> list[str]:
         "--sr_scale", "2.0",
         "--causal",
         "--seed", "42",
-        "--kv_len", "9",
+        "--kv_len", KV_LEN,
         "--latent_upsampler_config", "configs/latent_upsampler_flash.yaml",
         "--latent_upsampler_ckpt", "../checkpoints/refiner/latent_upsampler_flash.pt",
         "--use_window_attn",
@@ -134,7 +138,9 @@ class RefinerServer:
         args.output_folder = out_dir
         args.sr_scale = float(params["sr_scale"])
         ns["samples"] = [(params["input_path"], args.prompt)]
-        ns["torch"].manual_seed(int(params["seed"]))
+        torch = ns["torch"]
+        torch.manual_seed(int(params["seed"]))
+        torch.cuda.reset_peak_memory_stats()
 
         try:
             exec(self.loop_code, ns)
@@ -145,7 +151,14 @@ class RefinerServer:
             shutil.rmtree(out_dir, ignore_errors=True)
             raise
         finally:
-            ns["torch"].cuda.empty_cache()
+            peak = torch.cuda.max_memory_allocated() / 1024 ** 3
+            total = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+            print(f"Peak VRAM {peak:.1f} / {total:.1f} GB (kv_len={KV_LEN}, sr_scale={args.sr_scale})", flush=True)
+            # The pipeline keeps the last clip's KV cache as an attribute; drop it
+            # so an idle worker (or one that just OOM'd) holds only the weights.
+            if getattr(ns.get("pipeline"), "kv_caches", None) is not None:
+                ns["pipeline"].kv_caches = None
+            torch.cuda.empty_cache()
         return {
             "success": True,
             "output_path": str(outputs[0]),
