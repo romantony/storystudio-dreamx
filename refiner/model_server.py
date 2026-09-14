@@ -138,6 +138,25 @@ class RefinerServer:
         self.ns["write_video"] = write_video_crf
 
         torch = self.ns["torch"]
+        decode_timed = self.ns["_decode_timed"]
+
+        def decode_with_dit_offloaded(pipeline, latent):
+            # 2K VAE decode OOMs a 48GB card while the DiT (~10 GB) and the last
+            # chunk's KV cache still sit on the GPU; neither is needed to decode.
+            t_off = time.time()
+            pipeline.kv_caches = None
+            pipeline.generator.to("cpu")
+            torch.cuda.empty_cache()
+            print(f"Offloaded DiT for decode in {time.time() - t_off:.1f}s", flush=True)
+            try:
+                return decode_timed(pipeline, latent)
+            finally:
+                t_on = time.time()
+                pipeline.generator.to("cuda")
+                print(f"Restored DiT in {time.time() - t_on:.1f}s", flush=True)
+
+        # The loop resolves _decode_timed from this namespace at call time.
+        self.ns["_decode_timed"] = decode_with_dit_offloaded
         allocated = torch.cuda.memory_allocated() / 1024 ** 3
         print(f"✓ Refiner ready in {time.time() - t0:.1f}s — {allocated:.1f} GB allocated", flush=True)
 
